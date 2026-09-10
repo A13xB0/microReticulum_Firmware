@@ -1,0 +1,180 @@
+# ScotMesh firmware release build.
+#
+# Manual only (workflow_dispatch): nothing runs on push. Builds every
+# supported board in parallel, packages each with `pio run -t package`
+# (extra_script.py), collects the zips/uf2s, writes release.json and
+# publishes a GitHub release. rnode.scotmesh.net mirrors the release
+# assets so the web flasher can fetch them (GitHub itself sends no CORS).
+name: Release firmware
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag, e.g. v1.86-scotmesh.1"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark as pre-release"
+        required: false
+        type: boolean
+        default: false
+      notes:
+        description: "Release notes (Markdown, optional)"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+env:
+  PLATFORMIO_CORE_DIR: ${{ github.workspace }}/.pio-core
+
+jobs:
+  build:
+    name: ${{ matrix.env }}
+    runs-on: ubuntu-24.04
+    # One board failing must not sink the whole release; the publish job
+    # ships whatever built and lists what didn't.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        env:
+          # ESP32 / ESP32-S3
+          - rnode-ng-20
+          - rnode-ng-21
+          - ttgo-t-beam
+          - ttgo-t-beam-sx1262
+          - ttgo-t-beam-supreme
+          - lilygo-t3-s3
+          - lilygo-t3-s3-sx127x
+          - lilygo-t3-s3-sx1280-pa
+          - lilygo-t-deck
+          - ttgo-lora32-v1
+          - ttgo-lora32-v2
+          - ttgo-lora32-v2-extled
+          - ttgo-lora32-v21
+          - ttgo-lora32-v21-extled
+          # ttgo-lora32-v21-tcxo is omitted: its custom_variant is
+          # lora32v21_extled upstream, so it would overwrite the extled zip.
+          - heltec_wifi_lora_32_V2
+          - heltec_wifi_lora_32_V2-extled
+          - heltec_wifi_lora_32_V3
+          - heltec_wifi_lora_32_V4
+          - heltec-wireless-tracker-v2
+          - featheresp32
+          - seeed_xiao_esp32s3
+          - generic-esp32
+          # nRF52840
+          - wiscore_rak4631
+          - wiscore_rak3401
+          - seeed_solar_node_p1
+          - lilygo-t-echo
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            .pio-core
+            ~/.platformio
+          key: pio-${{ runner.os }}-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            pio-${{ runner.os }}-${{ matrix.env }}-
+            pio-${{ runner.os }}-
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q zip
+          python -m pip install --upgrade pip
+          pip install platformio==6.1.16 pyserial
+
+      - name: Build and package
+        run: |
+          # extra_script.py copies boot_app0.bin from ~/.platformio/packages;
+          # point that at the cached core dir.
+          mkdir -p ~/.platformio
+          ln -sfn "$PLATFORMIO_CORE_DIR/packages" ~/.platformio/packages
+          pio run -e "${{ matrix.env }}" -t package
+          ls -la Release/
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p out
+          # Debug zips (.elf + .map, ~17 MB each) are not shipped.
+          find Release -maxdepth 1 -type f \( -name 'rnode_firmware_*.zip' -o -name 'rnode_firmware_*.uf2' \) ! -name '*_debug.zip' -exec cp {} out/ \;
+          ls -la out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fw-${{ matrix.env }}
+          path: out/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Assemble Release/
+        run: |
+          mkdir -p Release
+          find artifacts -type f -exec cp {} Release/ \;
+          python3 release_hashes.py > Release/release.json
+          cat Release/release.json
+          # Web console (single-file RNode Console) — packaged with the
+          # firmware's own script; fall back to the raw page if npx fails.
+          bash webconsole/package.sh --strip --out Release/console.html || cp webconsole/index.html Release/console.html
+          ls -la Release/
+
+      - name: Which boards built
+        id: built
+        run: |
+          {
+            echo 'BUILT<<EOF'
+            ls Release | grep -E '^rnode_firmware_.*\.(zip|uf2)$' | sed 's/^/- /'
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            printf '%s\n\n' "${{ inputs.notes }}"
+            echo "ScotMesh build of microReticulum_Firmware (fork of attermann/microReticulum_Firmware)."
+            echo "Built by GitHub Actions from \`${{ github.sha }}\` on \`${{ github.ref_name }}\`."
+            echo "Flash it from your browser at https://rnode.scotmesh.net"
+            echo
+            echo "**Images in this release**"
+            echo "${{ steps.built.outputs.BUILT }}"
+          } > notes.md
+          args=(--title "${{ inputs.version }}" --notes-file notes.md --target "${{ github.sha }}")
+          if [ "${{ inputs.prerelease }}" = "true" ]; then args+=(--prerelease); fi
+          gh release create "${{ inputs.version }}" "${args[@]}" \
+            Release/rnode_firmware_*.zip Release/rnode_firmware_*.uf2 \
+            Release/release.json Release/console.html Release/console_image.bin
