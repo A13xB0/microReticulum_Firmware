@@ -173,6 +173,18 @@ webconsole/package.sh --minify  # full minification with JS identifier mangling
 
 Output lands in `Release/console.html` by default. The same artifact is baked into the embedded firmware via `Console/build.py`.
 
+## Seeed SenseCAP Solar Node P1
+
+`env:seeed_solar_node_p1` targets the [SenseCAP Solar Node P1](https://wiki.seeedstudio.com/meshtastic_solar_node/) (and P1-Pro): a XIAO nRF52840 Plus with a Wio-SX1262, a 5 W panel and four 18650 cells in a weatherproof box — a standalone, unattended Reticulum transport node with no host computer.
+
+- **Hardware definitions** come from the Meshtastic (`variants/nrf52840/seeed_solar_node`) and MeshCore (`variants/sensecap_solar`) targets, which agree on every pin: SX1262 on SPI0 (SCK P1.13 / MISO P1.14 / MOSI P1.15), CS P0.04, DIO1 P0.03, RESET P0.28, BUSY P0.29, RXEN P0.05 with DIO2 as the TX switch, DIO3 TCXO at 1.8 V. See `variants/seeed_solar_node_p1/` and the `BOARD_SEEED_P1` block in `Boards.h`.
+- **Persistence** uses the on-board 2 MiB P25Q16H over the nRF52840's QSPI peripheral, so the path table is not limited by InternalFS's 28 KB. Requires the `qspi-transport` branch of microStore (an added constructor that accepts an external `Adafruit_FlashTransport`).
+- **Battery**: the 18650 pack is read through the board's 1 M / 512 k divider on P0.31 (enabled by P0.14). Voltage, percentage and charge state are available in the RNode Console (USB, BLE, or remotely over Reticulum via the Provisioning **Power** metrics), on the NomadNet stats page, and in `rnodeconf --info`. Calibrate `P1_VBAT_DIVIDER` in `Power.h` against a meter if needed.
+- **SoftDevice**: Seeed ships S140 **7.3.0**, so this env links with `boards/nrf52840_s140_v7.ld` and the SD7 headers under `lib/nrf52/` (both from MeshCore). Do not use the v6 script the RAK targets use.
+- **Provisioning**: the board is registered as `PRODUCT_RAK4631` / `MODEL_12` (same MCU, radio and band class) so a stock `rnodeconf` accepts it. Bootstrap with `rnodeconf --platform nrf52 --product 10 --model 12 --hwrev 1 <port>` after the first upload; the PlatformIO post-upload step writes the firmware hash.
+- **Flashing**: double-tap RESET (XIAO-BOOT), then `pio run -e seeed_solar_node_p1 -t upload`, or `pio run -e seeed_solar_node_p1 -t package` and drag `Release/*.uf2` onto the XIAO-BOOT drive. The DFU zip carries `--sd-req 0x0123` for SD 7.3.0.
+- The P1-Pro's L76K GPS is held powered off; there is no GPS support in this firmware. Deep sleep is not implemented for this board yet.
+
 ## Native Daemon Support
 
 In addition to the embedded ESP32 / nRF52 firmware images, the project now builds two **native** targets backed by Meshtastic's [platform-native](https://github.com/meshtastic/platform-native) (Portduino). These produce a real binary you can run on a host machine — useful for development without a board attached, and for running a self-contained Reticulum transport node on small Linux SBCs.

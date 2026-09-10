@@ -120,6 +120,9 @@
   #define MODEL_11            0x11 // RAK4631, 433 Mhz
   #define MODEL_12            0x12 // RAK4631, 868 Mhz
   #define BOARD_RAK3401       0x52 // RAK3401 + RAK13302 (nRF52840 + SX1262 + SKY66122 1W FEM)
+  #define BOARD_SEEED_P1      0x53 // Seeed SenseCAP Solar Node P1 (XIAO nRF52840 Plus + Wio-SX1262).
+                                   // Provisioned as PRODUCT_RAK4631 / MODEL_12 so stock rnodeconf
+                                   // recognises it (same MCU, radio and 22 dBm 868 MHz band).
   #define MODEL_13            0x13 // RAK3401 + RAK13302, 433 MHz
   #define MODEL_14            0x14 // RAK3401 + RAK13302, 868 MHz
 
@@ -167,7 +170,7 @@
   #endif
 
   #ifndef MODEM
-    #if BOARD_MODEL == BOARD_RAK4631 || BOARD_MODEL == BOARD_RAK3401
+    #if BOARD_MODEL == BOARD_RAK4631 || BOARD_MODEL == BOARD_RAK3401 || BOARD_MODEL == BOARD_SEEED_P1
       #define MODEM SX1262
     #elif BOARD_MODEL == BOARD_GENERIC_NRF52
       #define MODEM SX1262
@@ -914,6 +917,57 @@
 
       // User Input Button
       const int pin_btn_usr1 = 31;   // AIN1 (WB_A1) on J11 header / connector pin 22
+
+    #elif BOARD_MODEL == BOARD_SEEED_P1
+      // Seeed SenseCAP Solar Node P1: XIAO nRF52840 Plus + Wio-SX1262 in a solar
+      // enclosure. RAK4631-class hardware (same MCU, radio and RXEN+DIO2 switch
+      // topology); pins are Arduino numbers from variants/seeed_solar_node_p1.
+      #define HAS_EEPROM false
+      #define HAS_DISPLAY false
+      #define HAS_BLUETOOTH false
+      #define HAS_BLE true
+      #define HAS_CONSOLE false
+      #define HAS_PMU true
+      #define HAS_NP false
+      #define HAS_SD false
+      #define HAS_TCXO true            // DIO3-driven TCXO at 1.8 V (see sx126x::enableTCXO)
+      #define HAS_RF_SWITCH_RX_TX true
+      #define HAS_BUSY true
+      #define HAS_INPUT true
+      #define DIO2_AS_RF_SWITCH true   // TX side of the RF switch is driven by SX1262 DIO2
+      #define CONFIG_UART_BUFFER_SIZE 6144
+      #define CONFIG_QUEUE_SIZE 6144
+      #define CONFIG_QUEUE_MAX_LENGTH 200
+      #define EEPROM_SIZE 296
+      #define EEPROM_OFFSET EEPROM_SIZE-EEPROM_RESERVED
+      #define BLE_MANUFACTURER "Seeed Studio"
+      #define BLE_MODEL "SenseCAP Solar Node P1"
+
+      // SX1262 on SPI0: SCK P1.13, MISO P1.14, MOSI P1.15
+      const int pin_rxen = 5;          // P0.05 LORA_SW: RX enable (GPIO), TXEN not connected
+      const int pin_txen = -1;
+      const int pin_reset = 2;         // P0.28
+      const int pin_cs = 4;            // P0.04
+      const int pin_sclk = 8;          // P1.13
+      const int pin_mosi = 10;         // P1.15
+      const int pin_miso = 9;          // P1.14
+      const int pin_busy = 3;          // P0.29
+      const int pin_dio = 1;           // P0.03 DIO1
+      const int pin_tcxo_enable = -1;  // TCXO powered by DIO3 via enableTCXO(), not a GPIO
+
+      // LEDs (active HIGH): white user LED P0.15 as RX, blue LED P0.19 as TX
+      const int pin_led_rx = 11;
+      const int pin_led_tx = 12;
+
+      // User button P1.01 (active LOW, pull-up)
+      const int pin_btn_usr1 = 13;
+
+      // Battery: divider on P0.31 / AIN7, enabled by driving P0.14 LOW. Read in Power.h.
+      const int pin_vbat_en = 19;
+
+      // Power rails we must settle early (see setup() in RNode_Firmware.ino)
+      const int pin_gps_en = 18;       // P1.05, L76K on the P1-Pro; kept off
+      const int pin_qspi_cs = 22;      // P0.25, on-board P25Q16H QSPI flash
 
     #elif BOARD_MODEL == BOARD_TECHO
       #define _PINNUM(port, pin) ((port) * 32 + (pin))

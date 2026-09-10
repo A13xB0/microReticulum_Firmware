@@ -828,6 +828,9 @@ void sx126x::enableTCXO() {
         #elif BOARD_MODEL == BOARD_RAK3401
           // RAK13302 specifies DIO3 TCXO at 1.8V (SX126X_DIO3_TCXO_VOLTAGE 1.8)
           mode = MODE_TCXO_1_8V_6X;
+        #elif BOARD_MODEL == BOARD_SEEED_P1
+          // Wio-SX1262: DIO3 TCXO at 1.8 V (SX126X_DIO3_TCXO_VOLTAGE 1.8 in both Meshtastic and MeshCore)
+          mode = MODE_TCXO_1_8V_6X;
         #elif BOARD_MODEL == BOARD_TBEAM
           mode = MODE_TCXO_1_8V_6X;
         #elif BOARD_MODEL == BOARD_TDECK

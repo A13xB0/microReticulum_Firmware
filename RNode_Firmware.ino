@@ -565,6 +565,22 @@ void setup() {
       pinMode(PIN_LED_BLUE, OUTPUT);
       delay(200);
     #endif
+    #if BOARD_MODEL == BOARD_SEEED_P1
+      // Mirror initVariant() from the Meshtastic/MeshCore P1 variants: GPS rail off
+      // (P1-Pro), QSPI flash deselected, battery divider enabled, LEDs off, button pulled up.
+      pinMode(pin_gps_en, OUTPUT);
+      digitalWrite(pin_gps_en, LOW);
+      pinMode(pin_qspi_cs, OUTPUT);
+      digitalWrite(pin_qspi_cs, HIGH);
+      pinMode(pin_vbat_en, OUTPUT);
+      digitalWrite(pin_vbat_en, LOW);
+      pinMode(pin_led_rx, OUTPUT);
+      digitalWrite(pin_led_rx, LOW);
+      pinMode(pin_led_tx, OUTPUT);
+      digitalWrite(pin_led_tx, LOW);
+      pinMode(pin_btn_usr1, INPUT_PULLUP);
+      delay(10);   // let the SX1262 rail settle, as MeshCore does
+    #endif
 
     if (!eeprom_begin()) { Serial.write("EEPROM initialisation failed.\r\n"); }
   #endif
@@ -599,9 +615,9 @@ void setup() {
     boot_seq();
   #endif
 
-  #if BOARD_MODEL != BOARD_RAK4631 && BOARD_MODEL != BOARD_RAK3401 && BOARD_MODEL != BOARD_HELTEC_T114 && BOARD_MODEL != BOARD_TECHO && BOARD_MODEL != BOARD_T3S3 && BOARD_MODEL != BOARD_TBEAM_S_V1 && BOARD_MODEL != BOARD_HELTEC32_V4 && BOARD_MODEL != BOARD_HELTEC_TRACKER_V2
+  #if BOARD_MODEL != BOARD_RAK4631 && BOARD_MODEL != BOARD_RAK3401 && BOARD_MODEL != BOARD_SEEED_P1 && BOARD_MODEL != BOARD_HELTEC_T114 && BOARD_MODEL != BOARD_TECHO && BOARD_MODEL != BOARD_T3S3 && BOARD_MODEL != BOARD_TBEAM_S_V1 && BOARD_MODEL != BOARD_HELTEC32_V4 && BOARD_MODEL != BOARD_HELTEC_TRACKER_V2
     // Some boards need to wait until the hardware UART is set up before booting
-    // the full firmware. In the case of the RAK4631, RAK3401, and Heltec T114,
+    // the full firmware. In the case of the RAK4631, RAK3401, Seeed P1, and Heltec T114,
     // the line below will wait until a serial connection is actually established
     // with a master. Thus, it is disabled on this platform.
     while (!Serial);
@@ -951,6 +967,31 @@ void setup() {
     // If no other initialize attempts succeeded then fallback to internal flash
     if (!init_success) {
       TRACE("Using internal flash...");
+      filesystem = microStore::Adapters::InternalFSFileSystem();
+      if (!filesystem.init()) WARNING("Failed to initialize filesystem!");
+      else TRACE("Initialized internal flash");
+    }
+#elif BOARD_MODEL == BOARD_SEEED_P1
+    // The XIAO nRF52840 Plus carries a 2 MiB P25Q16H on the nRF52840's QSPI
+    // peripheral (pins from variants/seeed_solar_node_p1/variant.h). Using it
+    // for the path table sidesteps InternalFS's 28 KB ceiling.
+    bool init_success = false;
+    {
+      TRACE("Looking for on-board P25Q16H QSPI flash...");
+      static Adafruit_FlashTransport_QSPI qspi_transport(PIN_QSPI_SCK, PIN_QSPI_CS, PIN_QSPI_IO0, PIN_QSPI_IO1, PIN_QSPI_IO2, PIN_QSPI_IO3);
+      static const SPIFlash_Device_t device = P25Q16H;
+      filesystem = microStore::Adapters::FlashFSFileSystem(&device, &qspi_transport);
+      if (filesystem.init()) {
+        TRACE("Initialized P25Q16H QSPI flash");
+        init_success = true;
+        // 2 MiB: raise path store limits as for the RAK external flash modules
+        RNS::Transport::path_table_maxsize(500);
+        RNS::Transport::path_store_segment_size(24576);
+        RNS::Transport::path_store_segment_count(8);
+      }
+    }
+    if (!init_success) {
+      WARNING("QSPI flash unavailable, falling back to internal flash (28 KB)");
       filesystem = microStore::Adapters::InternalFSFileSystem();
       if (!filesystem.init()) WARNING("Failed to initialize filesystem!");
       else TRACE("Initialized internal flash");
