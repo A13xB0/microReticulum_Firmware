@@ -184,6 +184,7 @@ Output lands in `Release/console.html` by default. The same artifact is baked in
 - **Provisioning**: the board is registered as `PRODUCT_RAK4631` / `MODEL_12` (same MCU, radio and band class) so a stock `rnodeconf` accepts it. Bootstrap with `rnodeconf --platform nrf52 --product 10 --model 12 --hwrev 1 <port>` after the first upload; the PlatformIO post-upload step writes the firmware hash.
 - **Flashing**: double-tap RESET (XIAO-BOOT), then `pio run -e seeed_solar_node_p1 -t upload`, or `pio run -e seeed_solar_node_p1 -t package` and drag `Release/*.uf2` onto the XIAO-BOOT drive. The DFU zip carries `--sd-req 0x0123` for SD 7.3.0.
 - The P1-Pro's L76K GPS is held powered off; there is no GPS support in this firmware. Deep sleep is not implemented for this board yet.
+- **Verified on hardware (2026-09-10):** boots on a SenseCAP Solar Node P1 (bootloader `0.9.2-OTAFIX2.2-BP1.3`, S140 7.3.0), QSPI flash mounts, BLE up, provisioned and hash-validated by stock `rnodeconf`, TNC mode with the ScotMesh 868 profile at 22 dBm; its announces were received by a RAK-based RNode gateway 1 hop away and propagated to the ScotMesh backbone. Battery reads over KISS (`CMD_STAT_BAT`) and in the Provisioning metrics.
 
 ## Native Daemon Support
 
