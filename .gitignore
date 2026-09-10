@@ -15,3 +15,6 @@ eeprom
 state/*
 docker/workspace/*
 !docker/workspace/build
+Release/rnode_firmware_*.zip
+Release/rnode_firmware_*.uf2
+Release/*_debug.zip
