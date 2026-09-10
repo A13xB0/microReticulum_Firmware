@@ -33,7 +33,21 @@
 // https://learn.adafruit.com/introducing-the-adafruit-nrf52840-feather/hathach-memory-map
 // each section follows along from one another, in this order
 // this is always at the start of the memory map
-#define APPLICATION_START 0x26000
+//
+// The application starts right after the MBR and the SoftDevice. The
+// SoftDevice publishes its size in its info structure (SD base 0x1000 +
+// SOFTDEVICE_INFO_STRUCT_OFFSET 0x2000 + 8), and that size already counts
+// the MBR, so the field IS the application start: 0x26000 on S140 v6.x
+// boards (RAK4631, T-Echo), 0x27000 on S140 v7.x boards such as the Seeed
+// SenseCAP Solar Node P1. A fixed 0x26000 made the firmware-hash check fail
+// on every v7 board, which left the node stuck in host mode.
+#define NRF52_SD_SIZE_ADDR    (0x1000 + 0x2000 + 0x08)
+static inline uint32_t nrf52_application_start() {
+  uint32_t start = *((volatile uint32_t*)NRF52_SD_SIZE_ADDR);
+  if (start < 0x20000 || start > 0x40000 || (start & 0xFFF)) return 0x26000;  // implausible: keep the old default
+  return start;
+}
+#define APPLICATION_START (nrf52_application_start())
 
 #define USER_DATA_START 0xED000
 
@@ -143,12 +157,27 @@ void device_save_firmware_hash() {
 }
 
 #if MCU_VARIANT == MCU_NRF52
+#if BOARD_MODEL == BOARD_SEEED_P1
+// Seeed's bootloader build ("UF2 Bootloader 0.9.2-OTAFIX2.2-BP1.3") does not
+// leave the flashed image size at IMG_SIZE_START the way the Adafruit
+// bootloader does, so the self-hash covered the wrong span. Take the size
+// from the linker instead: .text up to __etext plus the initialised .data
+// that follows it in flash is exactly what objcopy emits as the .bin that
+// rnodeconf --firmware-hash is computed over.
+extern "C" uint32_t __etext, __data_start__, __data_end__;
+uint32_t retrieve_application_size() {
+    uint32_t text_end = (uint32_t)&__etext;
+    uint32_t data_len = (uint32_t)&__data_end__ - (uint32_t)&__data_start__;
+    return (text_end - APPLICATION_START) + data_len;
+}
+#else
 uint32_t retrieve_application_size() {
     uint8_t bytes[4];
     memcpy(bytes, (const void*)IMG_SIZE_START, 4);
     uint32_t fw_len = bytes[0] | bytes[1] << 8 | bytes[2] << 16 | bytes[3] << 24;
     return fw_len;
 }
+#endif
 
 void calculate_region_hash(unsigned long long start, unsigned long long end, uint8_t* return_hash) {
     // this function calculates the hash digest of a region of memory,
