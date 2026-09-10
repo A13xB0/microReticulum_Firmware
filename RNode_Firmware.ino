@@ -1996,6 +1996,10 @@ void serial_callback(uint8_t sbyte) {
       kiss_indicate_stat_tx();
     } else if (command == CMD_STAT_RSSI) {
       kiss_indicate_stat_rssi();
+    } else if (command == CMD_STAT_BAT) {
+      // Battery state + percentage on request (the frame already existed in
+      // Utilities.h but nothing sent it). Lets hosts read the pack over KISS.
+      kiss_indicate_battery();
     } else if (command == CMD_RADIO_LOCK) {
       update_radio_lock();
       kiss_indicate_radio_lock();
