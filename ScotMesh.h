@@ -54,6 +54,12 @@
 #define SM_DFU_MAGIC     0x5D     // GPREGRET2 value asking the next boot for a BLE update window
 #define SM_DFU_WINDOW_MS (20UL * 60UL * 1000UL)
 #define SM_TRIAL_MS      (5UL * 60UL * 1000UL)
+// Forgetting paired phones needs bond storage: nRF52 (Bluefruit) and ESP32 BLE; not ESP32 classic Bluetooth
+#if MCU_VARIANT == MCU_NRF52 || (MCU_VARIANT == MCU_ESP32 && HAS_BLE == true)
+  #define SM_CAN_UNPAIR 1
+#else
+  #define SM_CAN_UNPAIR 0
+#endif
 
 bool startRadio();
 void stopRadio();
@@ -723,6 +729,7 @@ static void pg_lights_bt(const RNS::Bytes& rid) {
   if (Vis("a", "bl")) { sm_blink_until = millis() + 30000UL; msg = "Blinking for 30 s."; }
 #if HAS_BLUETOOTH || HAS_BLE
   if (Vis("a", "b")) { bool on = Fis("b", "on"); if (on) bt_start(); else bt_stop(); bt_conf_save(on); sm_change(rid, on ? "Bluetooth on" : "Bluetooth off"); msg = "Saved."; }
+#if SM_CAN_UNPAIR
   if (Vis("a", "u")) { Ph("Forget all paired phones?"); P(DIM("They will need to pair again.") "\n"); PLf("Yes, unpair", 'i', "a=uy|k=%s", sm_token("unpair")); P("  "); PL("Cancel", 'i'); return; }
   if (Vis("a", "uy")) {
     if (sm_token_use(Vv("k"), "unpair")) {
@@ -735,12 +742,17 @@ static void pg_lights_bt(const RNS::Bytes& rid) {
     } else { msg = "Expired. Nothing changed."; kind = 'b'; }
   }
 #endif
+#endif
   Ph("Lights & Bluetooth"); Pmsg(kind, msg);
   PR("l", "on", sm.leds == 0); P(" On "); PR("l", "off", sm.leds == 1); P(" Off "); PR("l", "b10", sm.leds == 2); P(" 10 min after start\n");
   PL("Save", 'i', "l|a=l"); P("  "); PL("Blink 30 s", 'i', "a=bl"); P(" " DIM("errors always show") "\n");
 #if HAS_BLUETOOTH || HAS_BLE
   bool on = bt_state != BT_STATE_OFF;
-  P(">>Bluetooth\n"); PR("b", "on", on); P(" On "); PR("b", "off", !on); P(" Off  "); PL("Save", 'i', "b|a=b"); P("  "); PL("Unpair all", 'i', "a=u"); P("\n<\n");
+  P(">>Bluetooth\n"); PR("b", "on", on); P(" On "); PR("b", "off", !on); P(" Off  "); PL("Save", 'i', "b|a=b");
+#if SM_CAN_UNPAIR
+  P("  "); PL("Unpair all", 'i', "a=u");
+#endif
+  P("\n<\n");
 #endif
   PBACK();
 }
@@ -1066,10 +1078,9 @@ void sm_loop() {
   uint32_t now = millis(); uint64_t up = sm_uptime_ms();
   // lights
   sm_leds_off = sm.leds == 1 || (sm.leds == 2 && up > 600000ULL);
-  if ((int32_t)(sm_blink_until - now) > 0) {
-    bool ph = (now / 250) & 1;
-    if (pin_led_rx >= 0) digitalWrite(pin_led_rx, ph ? HIGH : LOW);
-    if (pin_led_tx >= 0) digitalWrite(pin_led_tx, ph ? LOW : HIGH);
+  if ((int32_t)(sm_blink_until - now) > 0) {       // "Blink 30 s" wins over "lights off"
+    sm_leds_off = false;
+    if ((now / 250) & 1) { led_tx_off(); led_rx_on(); } else { led_rx_off(); led_tx_on(); }
   }
   // radio trial
   if (sm_trial && (int32_t)(now - sm_trial_until) >= 0) { sm_trial = false; sm_radio_apply(sm_trial_prev); NOTICE("[radio] trial not confirmed within 5 min, reverted"); }
