@@ -942,6 +942,7 @@
       #define EEPROM_OFFSET EEPROM_SIZE-EEPROM_RESERVED
       #define BLE_MANUFACTURER "Seeed Studio"
       #define BLE_MODEL "SenseCAP Solar Node P1"
+      #define OCP_TUNED 0x38   // 140 mA, as MeshCore sets for this module at +22 dBm
 
       // SX1262 on SPI0: SCK P1.13, MISO P1.14, MOSI P1.15
       const int pin_rxen = 5;          // P0.05 LORA_SW: RX enable (GPIO), TXEN not connected

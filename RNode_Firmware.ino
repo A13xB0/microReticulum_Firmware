@@ -36,6 +36,10 @@
 
 #include <Arduino.h>
 #include <SPI.h>
+#if defined(NRF52840_XXAA) || defined(NRF52832_XXAA)
+  #include <nrf_sdm.h>
+  #include <nrf_soc.h>
+#endif
 #include "Utilities.h"
 #include "DeviceUID.h"
 #include "Platform.h"
@@ -477,17 +481,26 @@ void setup() {
   install_kiss_stdout();
 
   // CBA Safely wait for serial initialization
-  while (!Serial) {
-    if (millis() > 2000) {
-      break;
-    }
-    delay(10);
-  }
-  // Native USB opens reset the Tracker V2. Keep its startup short enough to
-  // answer rnodeconf's EEPROM request before the utility times out.
-  #if BOARD_MODEL != BOARD_HELTEC_TRACKER_V2
-    delay(2000);
+  bool usb_present = true;
+  #if MCU_VARIANT == MCU_NRF52
+    // No VBUS (running on battery): nobody is going to open the port, so do
+    // not spend four seconds waiting for it. Read the register directly —
+    // the SoftDevice is not enabled yet at this point.
+    usb_present = (NRF_POWER->USBREGSTATUS & POWER_USBREGSTATUS_VBUSDETECT_Msk) != 0;
   #endif
+  if (usb_present) {
+    while (!Serial) {
+      if (millis() > 2000) {
+        break;
+      }
+      delay(10);
+    }
+    // Native USB opens reset the Tracker V2. Keep its startup short enough to
+    // answer rnodeconf's EEPROM request before the utility times out.
+    #if BOARD_MODEL != BOARD_HELTEC_TRACKER_V2
+      delay(2000);
+    #endif
+  }
 
 #ifdef HAS_RNS
   printf("Total SRAM:  %7u bytes\n", RNS::Utilities::Memory::heap_size());
@@ -815,6 +828,32 @@ void setup() {
     #if HAS_BLUETOOTH || HAS_BLE == true
       bt_init();
       bt_init_ran = true;
+    #endif
+
+    #if MCU_VARIANT == MCU_NRF52
+      {
+        // Enable the DC/DC converter (as MeshCore does): ~30 % less supply
+        // current than the LDO, which matters for battery-only nodes during
+        // +22 dBm transmit bursts. Go through the SoftDevice when it owns
+        // the POWER peripheral.
+        uint8_t sd_enabled = 0;
+        sd_softdevice_is_enabled(&sd_enabled);
+        if (sd_enabled) { sd_power_dcdc_mode_set(NRF_POWER_DCDC_ENABLE); }
+        else { NRF_POWER->DCDCEN = 1; }
+
+        // Why did we boot? Shows up in the device console; RESETREAS == 0
+        // means a true power-on or a brown-out.
+        uint32_t rr = readResetReason();
+        printf("[init] reset reason 0x%08lx:%s%s%s%s%s%s\n", (unsigned long)rr,
+               (rr & POWER_RESETREAS_RESETPIN_Msk) ? " reset-pin" : "",
+               (rr & POWER_RESETREAS_DOG_Msk)      ? " watchdog" : "",
+               (rr & POWER_RESETREAS_SREQ_Msk)     ? " soft-reset" : "",
+               (rr & POWER_RESETREAS_LOCKUP_Msk)   ? " cpu-lockup" : "",
+               (rr & POWER_RESETREAS_OFF_Msk)      ? " wake-from-system-off" : "",
+               (rr & POWER_RESETREAS_VBUS_Msk)     ? " vbus-wake" : "");
+        if (rr == 0) printf("[init] reset reason: power-on or brown-out\n");
+        printf("[init] usb power %s\n", usb_present ? "present" : "absent (battery)");
+      }
     #endif
 
     if (console_active) {
@@ -1444,7 +1483,14 @@ bool startRadio() {
         // PA bias) are stable before the SX126x probes them.
         native_pinmap::assert_radio_enable_pins();
       #endif
-      if (!LoRa->begin(lora_freq)) {
+      // The modem's rail/TCXO can still be settling right after a
+      // battery-only power-up; give it a few attempts before giving up.
+      bool radio_started = false;
+      for (int attempt = 1; attempt <= 5 && !radio_started; attempt++) {
+        radio_started = LoRa->begin(lora_freq);
+        if (!radio_started) { printf("[radio] start failed (attempt %d of 5)\n", attempt); delay(300); }
+      }
+      if (!radio_started) {
         // The radio could not be started.
         // Indicate this failure over both the
         // serial port and with the onboard LEDs
@@ -1453,6 +1499,16 @@ bool startRadio() {
         #endif
         radio_error = true;
         kiss_indicate_error(ERROR_INITRADIO);
+        #if MCU_VARIANT == MCU_NRF52 || MCU_VARIANT == MCU_ESP32
+          if (op_mode == MODE_TNC) {
+            // A standalone node has nobody to notice the blink pattern:
+            // flash for three seconds, then restart and try the whole
+            // bring-up again instead of waiting for the 60 s watchdog.
+            printf("[radio] giving up, restarting\n");
+            led_indicate_error(15);
+            hard_reset();
+          }
+        #endif
         led_indicate_error(0);
         return false;
       } else {
