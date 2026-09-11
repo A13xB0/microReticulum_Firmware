@@ -33,7 +33,7 @@
 #include <microReticulum/Cryptography/Random.h>
 #include <microReticulum/Utilities/OS.h>
 #include <microReticulum/Utilities/Memory.h>
-#if MCU_VARIANT == MCU_ESP32
+#if defined(SCOTMESH_WIFI_UPDATE)      // ESP32 boards with two app slots (platformio.ini)
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Update.h>
@@ -350,7 +350,7 @@ static void sm_wipe_dir(const char* d) {
   if (!RNS::Utilities::OS::directory_exists(d)) return;
   for (auto& f : RNS::Utilities::OS::list_directory(d)) { char p[64]; snprintf(p, sizeof p, "%s/%s", d, f.c_str()); RNS::Utilities::OS::remove_file(p); }
 }
-#if MCU_VARIANT == MCU_ESP32
+#if defined(SCOTMESH_WIFI_UPDATE)
 static bool sm_has_ota_slot() { return esp_ota_get_next_update_partition(NULL) != NULL; }
 void sm_update_mode();
 #endif
@@ -362,11 +362,11 @@ void sm_early_boot() {
     for (const char* d : {"./path_store", "./known_store", "./hashlist_store", "./cache"}) sm_wipe_dir(d);
     for (const char* f : {"./transport_identity", "./destination_table", "./tunnels", SM_CFG_PATH, SM_LOG_PATH, SM_WIPE_PATH}) if (RNS::Utilities::OS::file_exists(f)) RNS::Utilities::OS::remove_file(f);
   }
-#if MCU_VARIANT == MCU_ESP32
+#if defined(SCOTMESH_WIFI_UPDATE)
   sm_update_mode();
 #endif
 }
-#if MCU_VARIANT == MCU_ESP32
+#if defined(SCOTMESH_WIFI_UPDATE)
 // Boot straight into a WiFi access point with an upload page, no mesh, for
 // 20 min; restarts when done.
 void sm_update_mode() {
@@ -969,7 +969,7 @@ static void pg_update(const RNS::Bytes& rid) {
       sm_dfu_action = db ? 2 : 3; sm_dfu_action_at = millis(); return;
     }
   }
-#elif MCU_VARIANT == MCU_ESP32
+#elif defined(SCOTMESH_WIFI_UPDATE)
   bool power_ok = battery_percent >= 30 || sm_charging() || battery_voltage < 0.1;
   if (!strcmp(a, "cw") && sm_has_ota_slot()) {
     if (!power_ok) { Ph("Firmware update"); Pmsg('b', "Battery low and not charging."); P(DIM("Needs 30%% or a charger.") "\n"); PL("Back", 'm'); return; }
@@ -994,12 +994,12 @@ static void pg_update(const RNS::Bytes& rid) {
   if (sm_dfu_window) P("`Fda3Update window open now`f\n");
   if (!power_ok) Pmsg('b', "Battery low: needs 30% or charging");
   else { PL("Bluetooth update", 'm', "a=cb"); P("\n"); PL("USB bootloader", 'm', "a=cu"); P("\n"); }
-#elif MCU_VARIANT == MCU_ESP32
+#elif defined(SCOTMESH_WIFI_UPDATE)
   if (!sm_has_ota_slot()) P("This board has one firmware slot:\nupdate over USB.\n");
   else if (!power_ok) Pmsg('b', "Battery low: needs 30% or charging");
   else { PL("WiFi update", 'm', "a=cw"); P(" " DIM("20 min access point") "\n"); }
 #else
-  P("Update over USB.\n");
+  P("This board has one firmware slot:\nupdate over USB.\n");
 #endif
   P("<\n"); PBACK();
 }
