@@ -5,7 +5,7 @@ GROUP(-lgcc -lc -lnosys)
 
 MEMORY
 {
-  FLASH (rx)     : ORIGIN = 0x27000, LENGTH = 0xED000 - 0x27000
+  FLASH (rx)     : ORIGIN = 0x27000, LENGTH = 0xC3000   /* ScotMesh: the SenseCAP P1 bootloader refuses DFU images over ~798,720 B (accepted 794,804, refused 800,640) */
 
   /* SRAM required by Softdevice depend on
    * - Attribute Table Size (Number of Services and Characteristics)

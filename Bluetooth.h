@@ -37,6 +37,7 @@
   #define BLE_RX_BUF 6144
   BLEUart SerialBT(BLE_RX_BUF);
   BLEDis  bledis;
+  BLEDfu bledfu;   // ScotMesh: Bluetooth firmware-update window (added only when requested)
   BLEBas  blebas;
   bool SerialBT_init = false;
 #endif
@@ -548,7 +549,12 @@ char bt_devname[11];
   void bt_start() {
     // Serial.println("BT Start");
     if (bt_state == BT_STATE_OFF) {
-      Bluefruit.setName(bt_devname);
+      #ifndef BOARD_SHORT_NAME
+        #define BOARD_SHORT_NAME "RNode"
+      #endif
+      static bool dfu_added = false;
+      if (sm_dfu_window && !dfu_added) { bledfu.begin(); dfu_added = true; }   // must be first service
+      Bluefruit.setName(sm_dfu_window ? BOARD_SHORT_NAME " DFU" : bt_devname);
       bledis.setManufacturer(BLE_MANUFACTURER);
       bledis.setModel(BLE_MODEL);
       // start device information service

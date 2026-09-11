@@ -834,6 +834,7 @@
       #define EEPROM_OFFSET EEPROM_SIZE-EEPROM_RESERVED
       #define BLE_MANUFACTURER "RAK Wireless"
       #define BLE_MODEL "RAK4640"
+      #define BOARD_SHORT_NAME "RAK4631"
 
       const int pin_btn_usr1 = 9;
 
@@ -942,6 +943,7 @@
       #define EEPROM_OFFSET EEPROM_SIZE-EEPROM_RESERVED
       #define BLE_MANUFACTURER "Seeed Studio"
       #define BLE_MODEL "SenseCAP Solar Node P1"
+      #define BOARD_SHORT_NAME "SenseCAP P1"
       #define OCP_TUNED 0x38   // 140 mA, as MeshCore sets for this module at +22 dBm
 
       // SX1262 on SPI0: SCK P1.13, MISO P1.14, MOSI P1.15

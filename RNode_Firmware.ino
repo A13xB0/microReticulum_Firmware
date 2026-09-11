@@ -40,6 +40,9 @@
   #include <nrf_sdm.h>
   #include <nrf_soc.h>
 #endif
+// ScotMesh: consulted by the LED helpers and the nRF52 Bluetooth start code
+bool sm_leds_off = false;
+bool sm_dfu_window = false;
 #include "Utilities.h"
 #include "DeviceUID.h"
 #include "Platform.h"
@@ -248,7 +251,13 @@ RNS::Interface udp_interface(RNS::Type::NONE);
   #endif // RNS_USE_FS
 #endif  // HAS_RNS
 // CBA logger callback
+#if defined(URTN_STATS_PAGES) && !defined(SCOTMESH_NO_PAGES)
+void sm_log_line(const char* msg);
+#endif
 void on_log(const char* msg, RNS::LogLevel level) {
+#if defined(URTN_STATS_PAGES) && !defined(SCOTMESH_NO_PAGES)
+  sm_log_line(msg);
+#endif
   if (kiss_framed_logs) {
     // Compose "<timestamp> [<level>] <msg>" into a stack buffer to avoid
     // String heap allocation. 256 bytes covers the longest practical line.
@@ -469,7 +478,17 @@ void dump_filesystem(const char* basepath, uint8_t level = 0, uint8_t max_level 
 }
 #endif
 
+#if defined(URTN_STATS_PAGES) && !defined(SCOTMESH_NO_PAGES)
+  #define SCOTMESH_PAGES
+  #include "ScotMesh.h"
+#endif
+
 void setup() {
+
+  #if MCU_VARIANT == MCU_NRF52 && defined(URTN_STATS_PAGES) && !defined(SCOTMESH_NO_PAGES)
+    sm_dfu_window = (NRF_POWER->GPREGRET2 == SM_DFU_MAGIC);
+    NRF_POWER->GPREGRET2 = 0;
+  #endif
 
   // Initialise serial communication
   memset(serialBuffer, 0, sizeof(serialBuffer));
@@ -828,6 +847,9 @@ void setup() {
     #if HAS_BLUETOOTH || HAS_BLE == true
       bt_init();
       bt_init_ran = true;
+      #if MCU_VARIANT == MCU_NRF52 && defined(SCOTMESH_PAGES)
+        if (sm_dfu_window && bt_state == BT_STATE_OFF) bt_start();
+      #endif
     #endif
 
     #if MCU_VARIANT == MCU_NRF52
@@ -1206,9 +1228,16 @@ printf("[init] op_mode: %U\n", op_mode);
         // to anyone who can reach the node, just like a Python NomadNet
         // node's default policy.
         //nomadnet_destination.register_request_handler("/page/index.mu", serve_page, RNS::Type::Destination::ALLOW_LIST, RNS::Transport::remote_management_allowed());
+#ifdef SCOTMESH_PAGES
+        sm_boot();
+        sm_register(nomadnet_destination);
+        // The old multi-packet stats pages (/page/stack.mu, /page/device.mu) are replaced by
+        // the Health page and /api/health, which fit in one LoRa packet.
+#else
         nomadnet_destination.register_request_handler("/page/index.mu", serve_page, RNS::Type::Destination::ALLOW_ALL);
         nomadnet_destination.register_request_handler("/page/stack.mu", serve_page, RNS::Type::Destination::ALLOW_LIST, RNS::Transport::remote_management_allowed());
         nomadnet_destination.register_request_handler("/page/device.mu", serve_page, RNS::Type::Destination::ALLOW_LIST, RNS::Transport::remote_management_allowed());
+#endif
 #ifdef HAS_BME
         if (BME680::bme_installed) {
           nomadnet_destination.register_request_handler("/page/telemetry.mu", serve_page, RNS::Type::Destination::ALLOW_ALL);
@@ -2872,6 +2901,10 @@ void loop() {
   #if HAS_INPUT
     input_read();
   #endif
+
+#ifdef SCOTMESH_PAGES
+  sm_loop();
+#endif
 
   // Feed WDT
 #if MCU_VARIANT == MCU_ESP32

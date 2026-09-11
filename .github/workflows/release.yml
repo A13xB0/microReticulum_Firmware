@@ -100,6 +100,8 @@ jobs:
           pip install platformio==6.1.16 pyserial
 
       - name: Build and package
+        env:
+          PLATFORMIO_BUILD_FLAGS: '-DSCOTMESH_FW_TAG=\"${{ inputs.version }}\"'
         run: |
           # extra_script.py copies boot_app0.bin from ~/.platformio/packages;
           # point that at the cached core dir.
