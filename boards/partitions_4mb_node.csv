@@ -1,0 +1,11 @@
+# 4 MB ESP32 boards running as a microReticulum node: 2.25 MB app, 1.6 MB store.
+# The default no_ota.csv (2 MB app) is too small for the ScotMesh pages on
+# RNode NG 2.0/2.1 and LoRa32 v2.1. The store only holds the node's identity,
+# settings and path table (a few hundred KB); the console image is not usable
+# on these boards because the same partition is mounted as LittleFS.
+# Name,   Type, SubType, Offset,  Size, Flags
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xe000,  0x2000,
+app0,     app,  ota_0,   0x10000, 0x240000,
+spiffs,   data, spiffs,  0x250000,0x1A0000,
+coredump, data, coredump,0x3F0000,0x10000,
