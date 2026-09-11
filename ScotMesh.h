@@ -40,8 +40,47 @@
 #ifndef SCOTMESH_FW_TAG
   #define SCOTMESH_FW_TAG "v1.86-scotmesh-dev"
 #endif
+// Board name for the page footer, About and /api/sys (Boards.h sets it for the P1 and RAK4631)
 #ifndef BOARD_SHORT_NAME
-  #ifdef BLE_MODEL
+  #if BOARD_MODEL == BOARD_HELTEC32_V3
+    #define BOARD_SHORT_NAME "Heltec V3"
+  #elif BOARD_MODEL == BOARD_HELTEC32_V4
+    #define BOARD_SHORT_NAME "Heltec V4"
+  #elif BOARD_MODEL == BOARD_HELTEC32_V2
+    #define BOARD_SHORT_NAME "Heltec V2"
+  #elif BOARD_MODEL == BOARD_HELTEC_TRACKER_V2
+    #define BOARD_SHORT_NAME "Heltec Tracker V2"
+  #elif BOARD_MODEL == BOARD_HELTEC_T114
+    #define BOARD_SHORT_NAME "Heltec T114"
+  #elif BOARD_MODEL == BOARD_XIAO_S3
+    #define BOARD_SHORT_NAME "XIAO ESP32S3"
+  #elif BOARD_MODEL == BOARD_T3S3
+    #define BOARD_SHORT_NAME "T3S3"
+  #elif BOARD_MODEL == BOARD_TBEAM
+    #define BOARD_SHORT_NAME "T-Beam"
+  #elif BOARD_MODEL == BOARD_TBEAM_S_V1
+    #define BOARD_SHORT_NAME "T-Beam Supreme"
+  #elif BOARD_MODEL == BOARD_TDECK
+    #define BOARD_SHORT_NAME "T-Deck"
+  #elif BOARD_MODEL == BOARD_LORA32_V1_0
+    #define BOARD_SHORT_NAME "LoRa32 v1.0"
+  #elif BOARD_MODEL == BOARD_LORA32_V2_0
+    #define BOARD_SHORT_NAME "LoRa32 v2.0"
+  #elif BOARD_MODEL == BOARD_LORA32_V2_1
+    #define BOARD_SHORT_NAME "LoRa32 v2.1"
+  #elif BOARD_MODEL == BOARD_RNODE_NG_20
+    #define BOARD_SHORT_NAME "RNode NG 2.0"
+  #elif BOARD_MODEL == BOARD_RNODE_NG_21
+    #define BOARD_SHORT_NAME "RNode NG 2.1"
+  #elif BOARD_MODEL == BOARD_TECHO
+    #define BOARD_SHORT_NAME "T-Echo"
+  #elif BOARD_MODEL == BOARD_RAK3401
+    #define BOARD_SHORT_NAME "RAK3401"
+  #elif BOARD_MODEL == BOARD_HUZZAH32
+    #define BOARD_SHORT_NAME "Feather ESP32"
+  #elif BOARD_MODEL == BOARD_GENERIC_ESP32
+    #define BOARD_SHORT_NAME "ESP32"
+  #elif defined(BLE_MODEL)
     #define BOARD_SHORT_NAME BLE_MODEL
   #else
     #define BOARD_SHORT_NAME "RNode"
