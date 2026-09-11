@@ -21,6 +21,7 @@
 | **Updates without a cable** | USB only | Started from the node's admin page: a 20-minute Bluetooth DFU window on the P1, a 20-minute WiFi access point with an upload page on ESP32 boards with two app slots. The boot-time firmware-hash check accepts the new image once (`ADDR_CONF_SMUP`), so the node comes back in transport mode. |
 | **Full reset** | — | KISS `0x8A` (and the Maintenance page): new identity, routes, known identities and settings gone, EEPROM kept. The flasher's "start from scratch" option uses it on nRF52 (plus an EEPROM wipe) and a chip erase on ESP32. |
 | **4 MB ESP32 boards** | `no_ota.csv` (2 MB app) | `boards/partitions_4mb_node.csv` (2.25 MB app, 1.6 MB store) for RNode NG 2.0/2.1 and LoRa32 v2.1, so the pages fit. The console image is not written on node builds (that partition is the node's LittleFS store). |
+| **Neighbour-probe freeze** | microReticulum sends neighbour probes from inside `Transport::jobs()`, and `Transport::outbound()` waits for jobs to finish on the same loop, so the node freezes until the 60 s watchdog restarts it | [`patches/microReticulum/0001-…`](patches/microReticulum/) queues the probe and sends it once the pass ends. `apply_lib_patches.py` (a PlatformIO pre-script) applies every patch under `patches/` to the pinned microReticulum commit before each build, local or release, and stops the build if a patch no longer applies. |
 
 Everything below this line is the upstream README, kept as-is except where the P1 is mentioned.
 
