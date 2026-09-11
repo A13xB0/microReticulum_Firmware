@@ -803,7 +803,7 @@ static void pg_radio(const RNS::Bytes& rid) {
     if (!(r.f > 137000000 && r.f < 1020000000) || !bw_ok || r.sf < 5 || r.sf > 12 || r.cr < 5 || r.cr > 8 || r.txp < -9 || r.txp > 22) { msg = "Out of range. Nothing changed."; kind = 'b'; }
     else start(r);
   }
-  if (Vis("a", "p")) start(Vis("v", "433") ? SmRadio{433775000, 125000, 8, 5, 7} : SmRadio{867500000, 125000, 9, 5, 22});
+  if (Vis("a", "p")) start(Vis("v", "433") ? SmRadio{433775000, 125000, 8, 5, 7} : SmRadio{869462500, 125000, 9, 5, 22});
   if (Vis("a", "k") && sm_trial) { sm_trial = false; eeprom_conf_save(); sm_change(rid, "radio kept"); msg = "Kept and saved."; }
   Ph("Radio"); Pmsg(kind, msg);
   if (sm_trial && !msg) { P("`Fda3Trial: reverts in %lu min`f ", (unsigned long)((sm_trial_until - now) / 60000 + 1)); PL("Keep", 'f', "a=k"); P("\n"); }
