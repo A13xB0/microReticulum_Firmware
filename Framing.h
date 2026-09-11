@@ -63,6 +63,7 @@
   #define CMD_NP_INT      0x65
   #define CMD_BT_CTRL     0x46
   #define CMD_BT_UNPAIR   0x70
+  #define CMD_SM_RESET    0x8A  // ScotMesh: full reset (new identity), payload CMD_RESET_BYTE
   #define CMD_BT_PIN      0x62
   #define CMD_DIS_IA      0x69
   #define CMD_WIFI_MODE   0x6A

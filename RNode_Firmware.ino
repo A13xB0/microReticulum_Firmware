@@ -1103,6 +1103,13 @@ void setup() {
     TRACE("Registering filesystem...");
     RNS::Utilities::OS::register_filesystem(filesystem);
 
+#if defined(SCOTMESH_PAGES)
+    // Finish a full reset asked for on the last run; on ESP32 also run a WiFi
+    // firmware-update window if one was requested (serves the upload page
+    // instead of starting the mesh, then restarts).
+    sm_early_boot();
+#endif
+
 #if defined(RNS_USE_FS)
 #if 0
     filesystem.format();
@@ -2343,6 +2350,10 @@ void serial_callback(uint8_t sbyte) {
     } else if (command == CMD_BT_UNPAIR) {
       #if HAS_BLE
         if (sbyte == 0x01) { bt_debond_all(); }
+      #endif
+    } else if (command == CMD_SM_RESET) {
+      #ifdef SCOTMESH_PAGES
+        if (sbyte == CMD_RESET_BYTE) { sm_full_reset(); }
       #endif
     } else if (command == CMD_DISP_INT) {
       #if HAS_DISPLAY

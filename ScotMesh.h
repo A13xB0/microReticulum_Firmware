@@ -33,6 +33,13 @@
 #include <microReticulum/Cryptography/Random.h>
 #include <microReticulum/Utilities/OS.h>
 #include <microReticulum/Utilities/Memory.h>
+#if MCU_VARIANT == MCU_ESP32
+#include <WiFi.h>
+#include <WebServer.h>
+#include <Update.h>
+#include <esp_ota_ops.h>
+#include <esp_task_wdt.h>
+#endif
 #ifdef HAS_PROVISIONING
 #include <microReticulum/Provisioning/Provisioning.h>
 #endif
@@ -128,7 +135,9 @@ struct SmConfig {
   uint8_t  stamp_for[16] = {0};          // info hash the cached discovery stamp belongs to
   uint8_t  stamp[32] = {0};
   uint8_t  ann = 3;                      // announce every: 0 30 min, 1 1 h, 2 3 h, 3 6 h, 4 12 h
-  uint8_t  reserved[15] = {0};
+  uint8_t  upd_wifi = 0;                 // ESP32: next boot opens the WiFi update window instead of the mesh
+  char     upd_pw[9] = "";               // its one-time WiFi password
+  uint8_t  reserved[5] = {0};
 };
 static SmConfig sm;
 static const char* SM_CFG_PATH = "/scotmesh.cfg";
@@ -312,6 +321,94 @@ static void sm_pbkdf2(const char* pw, const uint8_t* salt, uint8_t out[32]) {
   }
   memcpy(out, t, 32);
 }
+// ---------------------------------------------------------------------------
+// Firmware updates and full reset
+// ---------------------------------------------------------------------------
+// Tell the boot-time firmware check (Device.h) to accept the next image once:
+// the hash the flasher stored belongs to the image being replaced.
+static void sm_mark_update() {
+  eeprom_update(eeprom_addr(ADDR_CONF_SMUP), SMUP_ACCEPT_BYTE);
+#if !HAS_EEPROM && MCU_VARIANT == MCU_NRF52
+  eeprom_flush();
+#endif
+}
+// Everything the node knows goes: identity (so its addresses change), routes,
+// known identities, settings, admins, change log. The RNode EEPROM (board
+// identity, radio settings) stays; the flasher wipes that separately.
+// The running stores keep their files open, so the wipe itself happens on the
+// next boot (sm_early_boot), before anything is opened; a marker file asks for it.
+static const char* SM_WIPE_PATH = "/scotmesh.wipe";
+void sm_full_reset() {
+  NOTICE("[scotmesh] full reset: new identity on the next start");
+#ifdef HAS_PROVISIONING
+  RNS::Provisioning::Provisioner::instance().factory_reset();
+#endif
+  RNS::Utilities::OS::write_file(SM_WIPE_PATH, RNS::Bytes("1"));
+  delay(200); hard_reset();
+}
+static void sm_wipe_dir(const char* d) {
+  if (!RNS::Utilities::OS::directory_exists(d)) return;
+  for (auto& f : RNS::Utilities::OS::list_directory(d)) { char p[64]; snprintf(p, sizeof p, "%s/%s", d, f.c_str()); RNS::Utilities::OS::remove_file(p); }
+}
+#if MCU_VARIANT == MCU_ESP32
+static bool sm_has_ota_slot() { return esp_ota_get_next_update_partition(NULL) != NULL; }
+void sm_update_mode();
+#endif
+// Called from setup() as soon as the filesystem is registered, before the
+// mesh starts: finishes a full reset, or (ESP32) runs the WiFi update window.
+void sm_early_boot() {
+  if (RNS::Utilities::OS::file_exists(SM_WIPE_PATH)) {
+    printf("[scotmesh] full reset: wiping identity, routes, known identities and settings\n");
+    for (const char* d : {"./path_store", "./known_store", "./hashlist_store", "./cache"}) sm_wipe_dir(d);
+    for (const char* f : {"./transport_identity", "./destination_table", "./tunnels", SM_CFG_PATH, SM_LOG_PATH, SM_WIPE_PATH}) if (RNS::Utilities::OS::file_exists(f)) RNS::Utilities::OS::remove_file(f);
+  }
+#if MCU_VARIANT == MCU_ESP32
+  sm_update_mode();
+#endif
+}
+#if MCU_VARIANT == MCU_ESP32
+// Boot straight into a WiFi access point with an upload page, no mesh, for
+// 20 min; restarts when done.
+void sm_update_mode() {
+  sm_load();
+  if (!sm.upd_wifi) return;
+  char pw[9]; memcpy(pw, sm.upd_pw, 9); pw[8] = 0;
+  sm.upd_wifi = 0; memset(sm.upd_pw, 0, sizeof sm.upd_pw); sm_save();       // one boot only, even if this one crashes
+  printf("[update] WiFi update window: SSID ScotMesh-Update, 20 min\n");
+  WiFi.mode(WIFI_AP); WiFi.softAP("ScotMesh-Update", pw); delay(200);
+  static WebServer srv(80); static bool done = false, failed = false; static size_t got = 0;
+  static const char* page =
+    "<!doctype html><meta name=viewport content='width=device-width'><title>ScotMesh node update</title>"
+    "<body style='font:16px system-ui;max-width:32em;margin:2em auto;padding:0 1em'><h2>" BOARD_SHORT_NAME " \xc2\xb7 " SCOTMESH_FW_TAG "</h2>"
+    "<p>Choose the <b>.bin</b> from inside the release zip (rnode_firmware_&hellip;.bin) and press Update. Keep this page open; the node restarts by itself when done.</p>"
+    "<form method=POST action=/update enctype=multipart/form-data><input type=file name=fw accept=.bin required> <button>Update</button></form>"
+    "<p style='color:#666'>This window closes 20 minutes after it opened.</p>";
+  srv.on("/", HTTP_GET, []() { srv.send(200, "text/html", page); });
+  srv.on("/update", HTTP_POST, []() {
+    if (failed) { srv.send(500, "text/plain", "Update failed: " + String(Update.errorString()) + ". The node restarts unchanged; open a new window from its page to try again."); delay(1500); hard_reset(); }
+    srv.send(200, "text/html", "<!doctype html><body style='font:16px system-ui;margin:2em'><h2>Updated.</h2><p>Written and verified; the node is restarting into the new firmware now. You can reconnect your phone to its usual WiFi.</p>");
+    done = true;
+  }, []() {
+    HTTPUpload& up = srv.upload();
+    esp_task_wdt_reset();
+    if (up.status == UPLOAD_FILE_START) { printf("[update] receiving %s\n", up.filename.c_str()); got = 0; if (Update.isRunning()) Update.abort(); failed = !Update.begin(UPDATE_SIZE_UNKNOWN); if (failed) printf("[update] cannot start: %s\n", Update.errorString()); }
+    else if (up.status == UPLOAD_FILE_WRITE && !failed) { if (Update.write(up.buf, up.currentSize) != up.currentSize) failed = true; got += up.currentSize; }
+    else if (up.status == UPLOAD_FILE_END && !failed) { failed = !Update.end(true); printf("[update] %s, %u bytes\n", failed ? Update.errorString() : "written and verified", (unsigned)got); }
+    else if (up.status == UPLOAD_FILE_ABORTED) { Update.abort(); failed = true; }
+  });
+  srv.begin();
+  uint32_t t0 = millis();
+  while (!done && millis() - t0 < SM_DFU_WINDOW_MS) { srv.handleClient(); esp_task_wdt_reset(); delay(2); }
+  if (done) {
+    sm_mark_update(); printf("[update] restarting into the new firmware\n");
+    uint32_t t1 = millis();                       // let the "Updated." reply reach the browser before the AP goes
+    while (millis() - t1 < 4000) { srv.handleClient(); esp_task_wdt_reset(); delay(2); }
+  }
+  else printf("[update] window closed, no update received\n");
+  delay(500); hard_reset();
+}
+#endif
+
 static bool sm_transport_on() {
 #ifdef HAS_PROVISIONING
   return RNS::Provisioning::Provisioner::instance().field(1, 1).as_bool();
@@ -817,16 +914,17 @@ static void pg_changes() {
 
 static void pg_maint(const RNS::Bytes& rid) {
   const char* msg = nullptr; char kind = 'o'; const char* a = Vv("a");
-  if (!strcmp(a, "cs") || !strcmp(a, "fr")) {
-    bool cs = !strcmp(a, "cs");
-    Ph(cs ? "Clear stored routes & data?" : "Factory reset?");
-    P(DIM("%s") "\n", cs ? "Routes are relearned; the node restarts." : "Settings to defaults. Keeps identity + admins.");
+  if (!strcmp(a, "cs") || !strcmp(a, "fr") || !strcmp(a, "fx")) {
+    bool cs = !strcmp(a, "cs"), fx = !strcmp(a, "fx");
+    Ph(cs ? "Clear stored routes & data?" : fx ? "Full reset: new identity?" : "Factory reset?");
+    P(DIM("%s") "\n", cs ? "Routes are relearned; the node restarts." : fx ? "New addresses, no admins, no settings. You will need USB to make it yours again." : "Settings to defaults. Keeps identity + admins.");
     PLf("Yes", 'x', "a=y|w=%s|k=%s", a, sm_token(a)); P("  "); PL("Cancel", 'x'); return;
   }
   if (!strcmp(a, "y")) {
     const char* w = Vv("w");
     if (!sm_token_use(Vv("k"), w)) { msg = "Expired."; kind = 'b'; }
     else if (!strcmp(w, "cs")) { sm_change(rid, "cleared stored data"); RNS::Transport::clear_storage(); hard_reset(); }
+    else if (!strcmp(w, "fx")) { sm_full_reset(); }
     else if (!strcmp(w, "fr")) {
       sm_change(rid, "factory reset");
       std::set<RNS::Bytes> keep = RNS::Transport::remote_management_allowed();
@@ -841,7 +939,7 @@ static void pg_maint(const RNS::Bytes& rid) {
   if (!strcmp(a, "sc")) { sm.sched = Fis("sm", "d") ? 1 : Fis("sm", "w") ? 2 : 0; sm_save(); sm_change(rid, "auto restart"); msg = "Saved."; }
   Ph("Maintenance"); Pmsg(kind, msg); PL("Announce now", 'x', "a=an");
   P("\n>>Auto restart\n"); PR("sm", "o", sm.sched == 0); P(" Off "); PR("sm", "d", sm.sched == 1); P(" Every day "); PR("sm", "w", sm.sched == 2); P(" Every week "); PL("Save", 'x', "sm|a=sc");
-  P("\n>>Reset\n"); PL("Clear routes & data", 'x', "a=cs"); P("  "); PL("Factory reset", 'x', "a=fr"); P("\n<\n"); PBACK();
+  P("\n>>Reset\n"); PL("Clear routes & data", 'x', "a=cs"); P("  "); PL("Factory reset", 'x', "a=fr"); P("  "); PL("Full reset", 'x', "a=fx"); P("\n<\n"); PBACK();
 }
 
 static void pg_update(const RNS::Bytes& rid) {
@@ -865,9 +963,27 @@ static void pg_update(const RNS::Bytes& rid) {
     if (!sm_token_use(Vv("k"), db ? "cb" : "cu")) msg = "Expired.";
     else {
       sm_change(rid, db ? "BLE update window" : "USB bootloader");
+      sm_mark_update();
       if (db) P("#!c=0\n`F2c5Update window open for 20 min.`f\nLook for \"" BOARD_SHORT_NAME " DFU\".");
       else P("#!c=0\n`F2c5Now in the USB bootloader.`f\n" DIM("Offline until flashed or reset."));
       sm_dfu_action = db ? 2 : 3; sm_dfu_action_at = millis(); return;
+    }
+  }
+#elif MCU_VARIANT == MCU_ESP32
+  bool power_ok = battery_percent >= 30 || sm_charging() || battery_voltage < 0.1;
+  if (!strcmp(a, "cw") && sm_has_ota_slot()) {
+    if (!power_ok) { Ph("Firmware update"); Pmsg('b', "Battery low and not charging."); P(DIM("Needs 30%% or a charger.") "\n"); PL("Back", 'm'); return; }
+    Ph("WiFi update window?"); P("Restarts as a WiFi access point for\n20 min, off the mesh. Someone in range\nuploads the .bin from the release zip\nat http://192.168.4.1\n`Fda3Someone must be within WiFi range.`f\n\n");
+    PLf("Yes, start", 'm', "a=dw|k=%s", sm_token("cw")); P("\n" DIM("This link works once, for 2 min.")); return;
+  }
+  if (!strcmp(a, "dw") && sm_has_ota_slot()) {
+    if (!sm_token_use(Vv("k"), "cw")) msg = "Expired.";
+    else {
+      RNS::Bytes r = RNS::Cryptography::random(8);
+      for (int i = 0; i < 8; i++) sm.upd_pw[i] = "abcdefghjkmnpqrstuvwxyz23456789"[r.data()[i] % 31];
+      sm.upd_pw[8] = 0; sm.upd_wifi = 1; sm_save(); sm_change(rid, "WiFi update window");
+      P("#!c=0\n`F2c5Update window opens in a few seconds.`f\nWiFi: ScotMesh-Update\nPassword: %s\nThen open http://192.168.4.1\n" DIM("Write the password down: it is shown once."), sm.upd_pw);
+      sm_dfu_action = 1; sm_dfu_action_at = millis(); return;
     }
   }
 #endif
@@ -878,8 +994,12 @@ static void pg_update(const RNS::Bytes& rid) {
   if (sm_dfu_window) P("`Fda3Update window open now`f\n");
   if (!power_ok) Pmsg('b', "Battery low: needs 30% or charging");
   else { PL("Bluetooth update", 'm', "a=cb"); P("\n"); PL("USB bootloader", 'm', "a=cu"); P("\n"); }
+#elif MCU_VARIANT == MCU_ESP32
+  if (!sm_has_ota_slot()) P("This board has one firmware slot:\nupdate over USB.\n");
+  else if (!power_ok) Pmsg('b', "Battery low: needs 30% or charging");
+  else { PL("WiFi update", 'm', "a=cw"); P(" " DIM("20 min access point") "\n"); }
 #else
-  P("Not possible over the air on\nthis board yet. Update over USB.\n");
+  P("Update over USB.\n");
 #endif
   P("<\n"); PBACK();
 }

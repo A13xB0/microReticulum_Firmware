@@ -241,6 +241,31 @@ void device_validate_partitions() {
         break;
       }
     }
+    // An update the node's own admin started over the air (ScotMesh pages) leaves
+    // the hash the flasher stored stale. The page sets ADDR_CONF_SMUP first; that
+    // marker accepts one new image and is then cleared. It survives the P1's
+    // Bluetooth-update boot (sm_dfu_window) because the new image arrives after it.
+    #if HAS_EEPROM
+      uint8_t smup = EEPROM.read(eeprom_addr(ADDR_CONF_SMUP));
+    #elif MCU_VARIANT == MCU_NRF52
+      uint8_t smup = eeprom_read(eeprom_addr(ADDR_CONF_SMUP));
+    #else
+      uint8_t smup = 0xFF;
+    #endif
+    if (smup == SMUP_ACCEPT_BYTE) {
+      if (!fw_signature_validated) {
+        memcpy(dev_firmware_hash_target, dev_firmware_hash, DEV_HASH_LEN);
+        fw_signature_validated = true;
+        device_save_firmware_hash();
+        printf("[init] New firmware accepted after an authorised update\r\n");
+      }
+      if (!sm_dfu_window) {
+        eeprom_update(eeprom_addr(ADDR_CONF_SMUP), 0xFF);
+        #if !HAS_EEPROM && MCU_VARIANT == MCU_NRF52
+          eeprom_flush();
+        #endif
+      }
+    }
   #endif
 }
 
